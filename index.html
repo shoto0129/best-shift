@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>best-shift</title>
+  <!-- SupabaseのJavaScriptライブラリを読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 10px; }
+    h1, h2 { color: #333; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input[type="text"], select { width: 100%; padding: 8px; box-sizing: border-box; }
+    .checkbox-group { display: flex; gap: 15px; margin-top: 5px; }
+    button { background-color: #007bff; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; }
+    button:hover { background-color: #0056b3; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+
+  <h1>best-shift</h1>
+
+  <!-- スタッフ追加フォーム -->
+  <section style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+    <h2>新規スタッフ追加</h2>
+    <form id="staff-form">
+      <div class="form-group">
+        <label for="name">名前:</label>
+        <input type="text" id="name" required placeholder="例：山田 太郎">
+      </div>
+
+      <div class="form-group">
+        <label>属性・役割:</label>
+        <div class="checkbox-group">
+          <label><input type="checkbox" id="is_leader"> リーダー</label>
+          <label><input type="checkbox" id="is_trainee"> 特定技能実習生</label>
+          <label><input type="checkbox" id="no_night_shift"> 夜勤なし（チェックで夜勤不可）</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="committee">担当委員会:</label>
+        <select id="committee">
+          <option value="">なし</option>
+          <option value="事故防止委員会">事故防止委員会</option>
+          <option value="ユニットリーダー会議">ユニットリーダー会議</option>
+          <option value="サービス担当者会議">サービス担当者会議</option>
+          <option value="感染委員会">感染委員会</option>
+          <option value="行事委員会">行事委員会</option>
+          <option value="運営会議">運営会議</option>
+        </select>
+      </div>
+
+      <button type="submit">スタッフを保存</button>
+    </form>
+  </section>
+
+  <!-- スタッフ一覧表示 -->
+  <section>
+    <h2>登録済みスタッフ一覧</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>名前</th>
+          <th>リーダー</th>
+          <th>実習生</th>
+          <th>夜勤</th>
+          <th>委員会</th>
+        </tr>
+      </thead>
+      <tbody id="staff-list">
+        <!-- ここにSupabaseから読み込んだデータが入ります -->
+      </tbody>
+    </table>
+  </section>
+
+  <script>
+    // 1. Supabaseの初期設定（ご自身のものに置き換えてください）
+    const SUPABASE_URL = 'https://swgbunughwwdigcgbiwx.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3Z2J1bnVnaHd3ZGlnY2diaXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNTcxNDMsImV4cCI6MjEwMDczMzE0M30.Qaph8HNXEMhk4vqXAXiwpYClRI2L9qu9vRV6K-nJ9qA';
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 2. スタッフ一覧を取得して画面に表示する関数
+    async function loadStaff() {
+      const { data, error } = await supabaseClient.from('staff').select('*').order('id', { ascending: true });
+      if (error) {
+        alert('データ取得エラー: ' + error.message);
+        return;
+      }
+
+      const listContainer = document.getElementById('staff-list');
+      listContainer.innerHTML = '';
+
+      data.forEach(person => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${person.name}</td>
+          <td>${person.is_leader ? '○' : '-'}</td>
+          <td>${person.is_trainee ? '○' : '-'}</td>
+          <td>${person.can_night_shift ? '可能' : '不可'}</td>
+          <td>${person.committee || 'なし'}</td>
+        `;
+        listContainer.appendChild(tr);
+      });
+    }
+
+    // 3. フォームからスタッフを追加する処理
+    document.getElementById('staff-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const name = document.getElementById('name').value;
+      const is_leader = document.getElementById('is_leader').checked;
+      const is_trainee = document.getElementById('is_trainee').checked;
+      const can_night_shift = !document.getElementById('no_night_shift').checked;
+      const committee = document.getElementById('committee').value || null;
+
+      const { error } = await supabaseClient.from('staff').insert([
+        { name, is_leader, is_trainee, can_night_shift, committee }
+      ]);
+
+      if (error) {
+        alert('保存に失敗しました: ' + error.message);
+      } else {
+        alert('保存しました！');
+        document.getElementById('staff-form').reset();
+        loadStaff(); // 一覧を再読み込み
+      }
+    });
+
+    // 画面を開いた時にデータを自動で読み込む
+    loadStaff();
+  </script>
+</body>
+</html>
