@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (委員会機能追加版)</title>
+  <title>best-shift (削除機能付き)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -17,6 +17,11 @@
     button:hover { background-color: #0056b3; }
     .btn-generate { background-color: #28a745; font-size: 16px; padding: 12px 20px; }
     .btn-generate:hover { background-color: #218838; }
+    
+    /* 削除ボタン用のスタイル */
+    .btn-delete { background-color: #dc3545; padding: 4px 8px; font-size: 11px; margin: 0; }
+    .btn-delete:hover { background-color: #c82333; }
+
     table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
     th, td { border: 1px solid #ccc; padding: 4px; text-align: center; min-width: 30px; }
     th { background-color: #f2f2f2; }
@@ -44,7 +49,6 @@
   <h1>best-shift</h1>
 
   <div class="grid-container">
-    <!-- スタッフ登録 -->
     <section class="card">
       <h2>1. スタッフ追加</h2>
       <form id="staff-form">
@@ -76,7 +80,6 @@
       </form>
     </section>
 
-    <!-- 希望休登録 -->
     <section class="card">
       <h2>2. 希望休の登録</h2>
       <form id="holiday-form">
@@ -92,7 +95,6 @@
       </form>
     </section>
 
-    <!-- 委員会日程登録 -->
     <section class="card">
       <h2>3. 委員会の予定登録</h2>
       <form id="committee-form">
@@ -129,26 +131,26 @@
     <div class="table-container" id="shift-table-container"></div>
   </section>
 
-  <!-- 登録データ一覧 -->
+  <!-- 登録データ一覧 (削除ボタン追加) -->
   <section class="grid-container">
     <div>
-      <h2>スタッフ</h2>
+      <h2>スタッフ一覧</h2>
       <table>
-        <thead><tr><th>名前</th><th>属性</th><th>委員会</th></tr></thead>
+        <thead><tr><th>名前</th><th>属性</th><th>委員会</th><th>操作</th></tr></thead>
         <tbody id="staff-list"></tbody>
       </table>
     </div>
     <div>
-      <h2>希望休</h2>
+      <h2>希望休一覧</h2>
       <table>
-        <thead><tr><th>名前</th><th>希望日</th></tr></thead>
+        <thead><tr><th>名前</th><th>希望日</th><th>操作</th></tr></thead>
         <tbody id="holiday-list"></tbody>
       </table>
     </div>
     <div>
       <h2>委員会の予定</h2>
       <table>
-        <thead><tr><th>委員会名</th><th>開催日</th></tr></thead>
+        <thead><tr><th>委員会名</th><th>開催日</th><th>操作</th></tr></thead>
         <tbody id="committee-list"></tbody>
       </table>
     </div>
@@ -175,20 +177,58 @@
       currentHolidayList = holidayData || [];
       currentCommitteeDays = committeeData || [];
 
+      // スタッフ一覧表示（削除ボタン付き）
       document.getElementById('staff-list').innerHTML = currentStaffList.map(p => 
-        `<tr><td>${p.name}</td><td>${p.is_leader?'L':''}${p.is_trainee?'実':''}</td><td>${p.committee||'-'}</td></tr>`
+        `<tr>
+          <td>${p.name}</td>
+          <td>${p.is_leader?'L':''}${p.is_trainee?'実':''}</td>
+          <td>${p.committee||'-'}</td>
+          <td><button class="btn-delete" onclick="deleteStaff(${p.id})">削除</button></td>
+        </tr>`
       ).join('');
       
       document.getElementById('holiday-staff').innerHTML = '<option value="">選択</option>' + currentStaffList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
       
+      // 希望休一覧表示（削除ボタン付き）
       document.getElementById('holiday-list').innerHTML = currentHolidayList.map(h => 
-        `<tr><td>${h.staff ? h.staff.name : ''}</td><td>${h.holiday_date}</td></tr>`
+        `<tr>
+          <td>${h.staff ? h.staff.name : ''}</td>
+          <td>${h.holiday_date}</td>
+          <td><button class="btn-delete" onclick="deleteHoliday(${h.id})">削除</button></td>
+        </tr>`
       ).join('');
 
+      // 委員会予定一覧表示（削除ボタン付き）
       document.getElementById('committee-list').innerHTML = currentCommitteeDays.map(c => 
-        `<tr><td>${c.committee_name}</td><td>${c.committee_date}</td></tr>`
+        `<tr>
+          <td>${c.committee_name}</td>
+          <td>${c.committee_date}</td>
+          <td><button class="btn-delete" onclick="deleteCommittee(${c.id})">削除</button></td>
+        </tr>`
       ).join('');
     }
+
+    // --- 削除機能 ---
+    window.deleteStaff = async function(id) {
+      if(!confirm('本当にこのスタッフを削除しますか？\n※関連する「希望休」も一緒に削除されます。')) return;
+      // データベースのエラーを防ぐため、先にこの人の希望休を消す
+      await supabaseClient.from('requested_holidays').delete().eq('staff_id', id);
+      // その後にスタッフを消す
+      await supabaseClient.from('staff').delete().eq('id', id);
+      loadData();
+    };
+
+    window.deleteHoliday = async function(id) {
+      if(!confirm('この希望休を削除しますか？')) return;
+      await supabaseClient.from('requested_holidays').delete().eq('id', id);
+      loadData();
+    };
+
+    window.deleteCommittee = async function(id) {
+      if(!confirm('この委員会の予定を削除しますか？')) return;
+      await supabaseClient.from('committee_days').delete().eq('id', id);
+      loadData();
+    };
 
     // --- メインのシフト生成ロジック ---
     document.getElementById('btn-generate-shift').addEventListener('click', () => {
@@ -196,7 +236,6 @@
       if (!selectedMonth || currentStaffList.length === 0) return alert('対象月を選択し、スタッフを登録してください');
 
       const [year, month] = selectedMonth.split('-').map(Number);
-      
       const startDate = new Date(year, month - 1, 16);
       const dates = [];
       for (let i = 0; i < 31; i++) {
@@ -208,8 +247,6 @@
 
       const holidayMap = {};
       currentHolidayList.forEach(h => holidayMap[`${h.staff_id}_${h.holiday_date}`] = true);
-
-      // 委員会の予定をマップ化 { '2026-08-20': '事故防止委員会' }
       const committeeMap = {};
       currentCommitteeDays.forEach(c => committeeMap[c.committee_date] = c.committee_name);
 
@@ -230,7 +267,6 @@
         return count;
       };
 
-      // STEP 1: 希望休をセット
       dates.forEach((d, idx) => {
         const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         currentStaffList.forEach(s => {
@@ -238,7 +274,6 @@
         });
       });
 
-      // STEP 2: 夜勤セット
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0); 
         const isBlack = (idx % 4 === 1);
@@ -275,40 +310,30 @@
         }
       });
 
-      // STEP 2.5: 委員会ルール (担当者を早Aにする)
       dates.forEach((d, idx) => {
         const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const todayCommittee = committeeMap[dateStr];
 
         if (todayCommittee) {
-          // その委員会の担当者で、まだシフトが入っていない(休みや夜勤でない)人を探す
           let assignee = currentStaffList.find(s => s.committee === todayCommittee && !schedule[s.id][idx]);
-          
-          // もし担当者が休みなら、代わりにリーダーを探す
           if (!assignee) {
             assignee = currentStaffList.find(s => s.is_leader && !schedule[s.id][idx]);
           }
-
           if (assignee) {
             schedule[assignee.id][idx] = '早A';
           }
         }
       });
 
-      // STEP 3: 残りの早A, 早B, 日A, 遅 を配置
       dates.forEach((d, idx) => {
         const isSun = d.getDay() === 0;
         let available = currentStaffList.filter(s => !schedule[s.id][idx]);
-
-        // その日に既に「早A」が委員会ルールで割り当てられているかチェック
         const isHayaAAssigned = currentStaffList.some(s => schedule[s.id][idx] === '早A');
 
         let reqShifts = ['早A', '日A', '遅', '早B'];
         if (isSun && available.length < 4) {
             reqShifts = ['早A', '日A', '遅']; 
         }
-
-        // 既に早Aがいる場合は、リストから早Aを削る（重複させない）
         if (isHayaAAssigned) {
             reqShifts = reqShifts.filter(shift => shift !== '早A');
         }
@@ -320,13 +345,11 @@
           schedule[selected.id][idx] = shiftCode;
         });
 
-        // 余った人は休みにする
         available.forEach(s => {
           schedule[s.id][idx] = '休';
         });
       });
 
-      // --- テーブル描画 ---
       let tableHTML = `<table><thead><tr><th style="min-width: 80px;">名前</th>`;
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0);
@@ -334,7 +357,6 @@
         const dayStr = ['日','月','火','水','木','金','土'][d.getDay()];
         let cls = d.getDay() === 0 ? 'sunday' : d.getDay() === 6 ? 'saturday' : '';
         let borderCls = isGrey ? 'grey-day' : isBlack ? 'black-day' : '';
-        
         tableHTML += `<th class="${cls} ${borderCls}">${d.getDate()}<br><small>${dayStr}</small></th>`;
       });
       tableHTML += `</tr></thead><tbody>`;
@@ -343,7 +365,6 @@
         tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:11px;">
           ${staff.name} <br><span style="color:#666; font-size:9px;">夜:${nightCount[staff.id]}回</span>
         </td>`;
-
         dates.forEach((d, idx) => {
           const shiftCode = schedule[staff.id][idx] || '未';
           const isSun = d.getDay() === 0;
@@ -357,7 +378,6 @@
       document.getElementById('shift-table-container').innerHTML = tableHTML;
     });
 
-    // フォーム送信処理群
     document.getElementById('staff-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const payload = {
