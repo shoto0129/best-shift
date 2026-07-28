@@ -9,55 +9,80 @@
   <style>
     body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 10px; }
     h1, h2 { color: #333; }
+    .card { background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 30px; }
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
-    input[type="text"], select { width: 100%; padding: 8px; box-sizing: border-box; }
+    input[type="text"], input[type="date"], select { width: 100%; padding: 8px; box-sizing: border-box; }
     .checkbox-group { display: flex; gap: 15px; margin-top: 5px; }
     button { background-color: #007bff; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; }
     button:hover { background-color: #0056b3; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
     th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
     th { background-color: #f2f2f2; }
+    .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 600px) { .grid-container { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
 
   <h1>best-shift</h1>
 
-  <!-- スタッフ追加フォーム -->
-  <section style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
-    <h2>新規スタッフ追加</h2>
-    <form id="staff-form">
-      <div class="form-group">
-        <label for="name">名前:</label>
-        <input type="text" id="name" required placeholder="例：山田 太郎">
-      </div>
-
-      <div class="form-group">
-        <label>属性・役割:</label>
-        <div class="checkbox-group">
-          <label><input type="checkbox" id="is_leader"> リーダー</label>
-          <label><input type="checkbox" id="is_trainee"> 特定技能実習生</label>
-          <label><input type="checkbox" id="no_night_shift"> 夜勤なし（チェックで夜勤不可）</label>
+  <div class="grid-container">
+    <!-- スタッフ追加フォーム -->
+    <section class="card">
+      <h2>新規スタッフ追加</h2>
+      <form id="staff-form">
+        <div class="form-group">
+          <label for="name">名前:</label>
+          <input type="text" id="name" required placeholder="例：山田 太郎">
         </div>
-      </div>
 
-      <div class="form-group">
-        <label for="committee">担当委員会:</label>
-        <select id="committee">
-          <option value="">なし</option>
-          <option value="事故防止委員会">事故防止委員会</option>
-          <option value="ユニットリーダー会議">ユニットリーダー会議</option>
-          <option value="サービス担当者会議">サービス担当者会議</option>
-          <option value="感染委員会">感染委員会</option>
-          <option value="行事委員会">行事委員会</option>
-          <option value="運営会議">運営会議</option>
-        </select>
-      </div>
+        <div class="form-group">
+          <label>属性・役割:</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" id="is_leader"> リーダー</label>
+            <label><input type="checkbox" id="is_trainee"> 実習生</label>
+            <label><input type="checkbox" id="no_night_shift"> 夜勤不可</label>
+          </div>
+        </div>
 
-      <button type="submit">スタッフを保存</button>
-    </form>
-  </section>
+        <div class="form-group">
+          <label for="committee">担当委員会:</label>
+          <select id="committee">
+            <option value="">なし</option>
+            <option value="事故防止委員会">事故防止委員会</option>
+            <option value="ユニットリーダー会議">ユニットリーダー会議</option>
+            <option value="サービス担当者会議">サービス担当者会議</option>
+            <option value="感染委員会">感染委員会</option>
+            <option value="行事委員会">行事委員会</option>
+            <option value="運営会議">運営会議</option>
+          </select>
+        </div>
+
+        <button type="submit">スタッフを保存</button>
+      </form>
+    </section>
+
+    <!-- 希望休追加フォーム -->
+    <section class="card">
+      <h2>希望休の登録</h2>
+      <form id="holiday-form">
+        <div class="form-group">
+          <label for="holiday-staff">スタッフ選択:</label>
+          <select id="holiday-staff" required>
+            <option value="">選択してください</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="holiday-date">希望日:</label>
+          <input type="date" id="holiday-date" required>
+        </div>
+
+        <button type="submit">希望休を保存</button>
+      </form>
+    </section>
+  </div>
 
   <!-- スタッフ一覧表示 -->
   <section>
@@ -72,19 +97,33 @@
           <th>委員会</th>
         </tr>
       </thead>
-      <tbody id="staff-list">
-        <!-- ここにSupabaseから読み込んだデータが入ります -->
-      </tbody>
+      <tbody id="staff-list"></tbody>
+    </table>
+  </section>
+
+  <!-- 希望休一覧表示 -->
+  <section style="margin-top: 30px;">
+    <h2>登録済み希望休一覧</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>名前</th>
+          <th>希望日</th>
+        </tr>
+      </thead>
+      <tbody id="holiday-list"></tbody>
     </table>
   </section>
 
   <script>
-    // 1. Supabaseの初期設定（ご自身のものに置き換えてください）
+    // 1. Supabaseの初期設定
     const SUPABASE_URL = 'https://swgbunughwwdigcgbiwx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3Z2J1bnVnaHd3ZGlnY2diaXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNTcxNDMsImV4cCI6MjEwMDczMzE0M30.Qaph8HNXEMhk4vqXAXiwpYClRI2L9qu9vRV6K-nJ9qA';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // 2. スタッフ一覧を取得して画面に表示する関数
+    let currentStaffList = [];
+
+    // 2. スタッフ一覧の読み込み ＆ セレクトボックスへの反映
     async function loadStaff() {
       const { data, error } = await supabaseClient.from('staff').select('*').order('id', { ascending: true });
       if (error) {
@@ -92,10 +131,18 @@
         return;
       }
 
+      currentStaffList = data;
+
+      // テーブル表示
       const listContainer = document.getElementById('staff-list');
       listContainer.innerHTML = '';
 
+      // 希望休フォームのセレクトボックス更新
+      const staffSelect = document.getElementById('holiday-staff');
+      staffSelect.innerHTML = '<option value="">選択してください</option>';
+
       data.forEach(person => {
+        // テーブル行追加
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${person.name}</td>
@@ -105,10 +152,41 @@
           <td>${person.committee || 'なし'}</td>
         `;
         listContainer.appendChild(tr);
+
+        // セレクトボックスの選択肢追加
+        const option = document.createElement('option');
+        option.value = person.id;
+        option.textContent = person.name;
+        staffSelect.appendChild(option);
       });
     }
 
-    // 3. フォームからスタッフを追加する処理
+    // 3. 希望休一覧の読み込み
+    async function loadHolidays() {
+      const { data, error } = await supabaseClient
+        .from('requested_holidays')
+        .select('*, staff(name)')
+        .order('holiday_date', { ascending: true });
+
+      if (error) {
+        console.error('希望休の取得エラー:', error.message);
+        return;
+      }
+
+      const listContainer = document.getElementById('holiday-list');
+      listContainer.innerHTML = '';
+
+      data.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${item.staff ? item.staff.name : '不明'}</td>
+          <td>${item.holiday_date}</td>
+        `;
+        listContainer.appendChild(tr);
+      });
+    }
+
+    // 4. スタッフの登録処理
     document.getElementById('staff-form').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -125,14 +203,35 @@
       if (error) {
         alert('保存に失敗しました: ' + error.message);
       } else {
-        alert('保存しました！');
+        alert('スタッフを保存しました！');
         document.getElementById('staff-form').reset();
-        loadStaff(); // 一覧を再読み込み
+        loadStaff();
       }
     });
 
-    // 画面を開いた時にデータを自動で読み込む
+    // 5. 希望休の登録処理
+    document.getElementById('holiday-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const staff_id = document.getElementById('holiday-staff').value;
+      const holiday_date = document.getElementById('holiday-date').value;
+
+      const { error } = await supabaseClient.from('requested_holidays').insert([
+        { staff_id, holiday_date }
+      ]);
+
+      if (error) {
+        alert('希望休の保存に失敗しました: ' + error.message);
+      } else {
+        alert('希望休を登録しました！');
+        document.getElementById('holiday-form').reset();
+        loadHolidays();
+      }
+    });
+
+    // 初期読み込み
     loadStaff();
+    loadHolidays();
   </script>
 </body>
 </html>
