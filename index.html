@@ -3,24 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift</title>
-  <!-- SupabaseのJavaScriptライブラリを読み込み -->
+  <title>best-shift (本格版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 10px; }
+    body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
     h1, h2 { color: #333; }
-    .card { background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 30px; }
+    .card { background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
-    input[type="text"], input[type="date"], select { width: 100%; padding: 8px; box-sizing: border-box; }
+    input[type="text"], input[type="date"], input[type="month"], select { width: 100%; padding: 8px; box-sizing: border-box; }
     .checkbox-group { display: flex; gap: 15px; margin-top: 5px; }
-    button { background-color: #007bff; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; }
+    button { background-color: #007bff; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
     button:hover { background-color: #0056b3; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    .btn-generate { background-color: #28a745; font-size: 16px; padding: 12px 20px; }
+    .btn-generate:hover { background-color: #218838; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+    th, td { border: 1px solid #ccc; padding: 4px; text-align: center; min-width: 30px; }
     th { background-color: #f2f2f2; }
+    .table-container { overflow-x: auto; margin-top: 15px; }
     .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media (max-width: 600px) { .grid-container { grid-template-columns: 1fr; } }
+    
+    /* シフト記号の装飾 */
+    .shift-休 { background-color: #ffe6e6; color: #d9534f; font-weight: bold; }
+    .shift-夜 { background-color: #1d2124; color: #ffffff; font-weight: bold; }
+    .shift-明 { background-color: #e2e3e5; color: #383d41; font-weight: bold; }
+    .shift-早A { background-color: #fff3cd; color: #856404; font-weight: bold; }
+    .shift-早B { background-color: #ffe8a1; color: #856404; font-weight: bold; }
+    .shift-日A { background-color: #d4edda; color: #155724; font-weight: bold; }
+    .shift-遅 { background-color: #e6f2ff; color: #0275d8; font-weight: bold; }
+    .shift-未 { background-color: #ffcccc; color: #000; } /* 割り当て失敗用 */
+    
+    .sunday { background-color: #fce8e6; }
+    .saturday { background-color: #e6f2ff; }
+    .grey-day { border-bottom: 4px solid gray; }
+    .black-day { border-bottom: 4px solid black; }
   </style>
 </head>
 <body>
@@ -28,7 +45,6 @@
   <h1>best-shift</h1>
 
   <div class="grid-container">
-    <!-- スタッフ追加フォーム -->
     <section class="card">
       <h2>新規スタッフ追加</h2>
       <form id="staff-form">
@@ -36,7 +52,6 @@
           <label for="name">名前:</label>
           <input type="text" id="name" required placeholder="例：山田 太郎">
         </div>
-
         <div class="form-group">
           <label>属性・役割:</label>
           <div class="checkbox-group">
@@ -45,7 +60,6 @@
             <label><input type="checkbox" id="no_night_shift"> 夜勤不可</label>
           </div>
         </div>
-
         <div class="form-group">
           <label for="committee">担当委員会:</label>
           <select id="committee">
@@ -58,180 +72,285 @@
             <option value="運営会議">運営会議</option>
           </select>
         </div>
-
         <button type="submit">スタッフを保存</button>
       </form>
     </section>
 
-    <!-- 希望休追加フォーム -->
     <section class="card">
       <h2>希望休の登録</h2>
       <form id="holiday-form">
         <div class="form-group">
           <label for="holiday-staff">スタッフ選択:</label>
-          <select id="holiday-staff" required>
-            <option value="">選択してください</option>
-          </select>
+          <select id="holiday-staff" required><option value="">選択</option></select>
         </div>
-
         <div class="form-group">
           <label for="holiday-date">希望日:</label>
           <input type="date" id="holiday-date" required>
         </div>
-
         <button type="submit">希望休を保存</button>
       </form>
     </section>
   </div>
 
-  <!-- スタッフ一覧表示 -->
-  <section>
-    <h2>登録済みスタッフ一覧</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>名前</th>
-          <th>リーダー</th>
-          <th>実習生</th>
-          <th>夜勤</th>
-          <th>委員会</th>
-        </tr>
-      </thead>
-      <tbody id="staff-list"></tbody>
-    </table>
+  <section class="card" style="border: 2px solid #28a745;">
+    <h2>シフト自動生成 (16日〜翌15日)</h2>
+    <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 200px;">
+        <label for="shift-month">対象月 (例: 8月を選ぶと 8/16〜9/15):</label>
+        <input type="month" id="shift-month" required>
+      </div>
+      <button type="button" class="btn-generate" id="btn-generate-shift">シフト作成を実行</button>
+    </div>
+
+    <!-- 凡例 -->
+    <div style="margin-top: 15px; font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+      <span class="shift-早A" style="padding: 2px 6px;">早A(7:00-16:00)</span>
+      <span class="shift-早B" style="padding: 2px 6px;">早B(8:00-17:00)</span>
+      <span class="shift-日A" style="padding: 2px 6px;">日A(10:00-19:00)</span>
+      <span class="shift-遅" style="padding: 2px 6px;">遅(11:00-20:00)</span>
+      <span class="shift-夜" style="padding: 2px 6px;">夜(17:00-9:45)</span>
+      <span class="shift-明" style="padding: 2px 6px;">明(出勤扱い)</span>
+      <span class="shift-休" style="padding: 2px 6px;">休</span>
+      <span style="padding: 2px 6px; border-bottom: 3px solid gray;">グレー(実習生可)</span>
+      <span style="padding: 2px 6px; border-bottom: 3px solid black;">黒(リーダー優先)</span>
+    </div>
+
+    <div class="table-container" id="shift-table-container"></div>
   </section>
 
-  <!-- 希望休一覧表示 -->
-  <section style="margin-top: 30px;">
-    <h2>登録済み希望休一覧</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>名前</th>
-          <th>希望日</th>
-        </tr>
-      </thead>
-      <tbody id="holiday-list"></tbody>
-    </table>
+  <!-- スタッフと希望休一覧の省略（これまでの表示と同じ） -->
+  <section class="grid-container">
+    <div>
+      <h2>登録済みスタッフ</h2>
+      <table>
+        <thead><tr><th>名前</th><th>属性</th><th>夜勤</th><th>委員会</th></tr></thead>
+        <tbody id="staff-list"></tbody>
+      </table>
+    </div>
+    <div>
+      <h2>希望休</h2>
+      <table>
+        <thead><tr><th>名前</th><th>希望日</th></tr></thead>
+        <tbody id="holiday-list"></tbody>
+      </table>
+    </div>
   </section>
 
   <script>
-    // 1. Supabaseの初期設定
     const SUPABASE_URL = 'https://swgbunughwwdigcgbiwx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3Z2J1bnVnaHd3ZGlnY2diaXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNTcxNDMsImV4cCI6MjEwMDczMzE0M30.Qaph8HNXEMhk4vqXAXiwpYClRI2L9qu9vRV6K-nJ9qA';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     let currentStaffList = [];
+    let currentHolidayList = [];
 
-    // 2. スタッフ一覧の読み込み ＆ セレクトボックスへの反映
-    async function loadStaff() {
-      const { data, error } = await supabaseClient.from('staff').select('*').order('id', { ascending: true });
-      if (error) {
-        alert('データ取得エラー: ' + error.message);
-        return;
-      }
+    const today = new Date();
+    document.getElementById('shift-month').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-      currentStaffList = data;
+    async function loadData() {
+      const { data: staffData } = await supabaseClient.from('staff').select('*').order('id');
+      const { data: holidayData } = await supabaseClient.from('requested_holidays').select('*, staff(name)');
+      
+      currentStaffList = staffData || [];
+      currentHolidayList = holidayData || [];
 
-      // テーブル表示
-      const listContainer = document.getElementById('staff-list');
-      listContainer.innerHTML = '';
-
-      // 希望休フォームのセレクトボックス更新
-      const staffSelect = document.getElementById('holiday-staff');
-      staffSelect.innerHTML = '<option value="">選択してください</option>';
-
-      data.forEach(person => {
-        // テーブル行追加
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${person.name}</td>
-          <td>${person.is_leader ? '○' : '-'}</td>
-          <td>${person.is_trainee ? '○' : '-'}</td>
-          <td>${person.can_night_shift ? '可能' : '不可'}</td>
-          <td>${person.committee || 'なし'}</td>
-        `;
-        listContainer.appendChild(tr);
-
-        // セレクトボックスの選択肢追加
-        const option = document.createElement('option');
-        option.value = person.id;
-        option.textContent = person.name;
-        staffSelect.appendChild(option);
-      });
+      // UI更新
+      document.getElementById('staff-list').innerHTML = currentStaffList.map(p => 
+        `<tr><td>${p.name}</td><td>${p.is_leader?'L':''}${p.is_trainee?'実':''}</td><td>${p.can_night_shift?'可':'不可'}</td><td>${p.committee||'-'}</td></tr>`
+      ).join('');
+      
+      document.getElementById('holiday-staff').innerHTML = '<option value="">選択</option>' + currentStaffList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      
+      document.getElementById('holiday-list').innerHTML = currentHolidayList.map(h => 
+        `<tr><td>${h.staff ? h.staff.name : ''}</td><td>${h.holiday_date}</td></tr>`
+      ).join('');
     }
 
-    // 3. 希望休一覧の読み込み
-    async function loadHolidays() {
-      const { data, error } = await supabaseClient
-        .from('requested_holidays')
-        .select('*, staff(name)')
-        .order('holiday_date', { ascending: true });
+    // --- メインのシフト生成ロジック ---
+    document.getElementById('btn-generate-shift').addEventListener('click', () => {
+      const selectedMonth = document.getElementById('shift-month').value;
+      if (!selectedMonth || currentStaffList.length === 0) return alert('対象月を選択し、スタッフを登録してください');
 
-      if (error) {
-        console.error('希望休の取得エラー:', error.message);
-        return;
+      const [year, month] = selectedMonth.split('-').map(Number);
+      
+      // 16日〜翌15日の日付配列を作成
+      const startDate = new Date(year, month - 1, 16);
+      const dates = [];
+      for (let i = 0; i < 31; i++) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + i);
+        if (i > 0 && d.getDate() === 16) break; // 翌月16日になったら終了（最大31日）
+        dates.push(d);
       }
 
-      const listContainer = document.getElementById('holiday-list');
-      listContainer.innerHTML = '';
+      // 希望休マップ
+      const holidayMap = {};
+      currentHolidayList.forEach(h => holidayMap[`${h.staff_id}_${h.holiday_date}`] = true);
 
-      data.forEach(item => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${item.staff ? item.staff.name : '不明'}</td>
-          <td>${item.holiday_date}</td>
-        `;
-        listContainer.appendChild(tr);
+      // シフト初期化
+      const schedule = {};
+      const nightCount = {};
+      currentStaffList.forEach(s => {
+        schedule[s.id] = {};
+        nightCount[s.id] = 0;
       });
-    }
 
-    // 4. スタッフの登録処理
+      // 補助関数: 連勤日数のカウント（過去に遡って数える）
+      const getConsecutiveDays = (staffId, dateIndex) => {
+        let count = 0;
+        for (let i = dateIndex - 1; i >= 0; i--) {
+          const shift = schedule[staffId][i];
+          if (!shift || shift === '休') break;
+          count++;
+        }
+        return count;
+      };
+
+      // STEP 1: 希望休をセット
+      dates.forEach((d, idx) => {
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        currentStaffList.forEach(s => {
+          if (holidayMap[`${s.id}_${dateStr}`]) schedule[s.id][idx] = '休';
+        });
+      });
+
+      // STEP 2: 夜勤➔明➔休 のセットを配置
+      dates.forEach((d, idx) => {
+        // 16日から0スタート。0=グレー, 1=黒, 2=無, 3=無, 4=グレー... (4日周期)
+        const isGrey = (idx % 4 === 0); 
+        const isBlack = (idx % 4 === 1);
+
+        // 夜勤候補を探す
+        let candidates = currentStaffList.filter(s => {
+          if (!s.can_night_shift) return false;
+          if (nightCount[s.id] >= 6) return false; // 月5-6回まで
+          if (schedule[s.id][idx] === '休') return false; // 本人希望休
+          // 翌日（明）、翌々日（休）が入れられるか（既に他シフトが入ってないか）
+          if (idx + 1 < dates.length && schedule[s.id][idx + 1]) return false;
+          // 実習生はグレーの日しかダメ
+          if (s.is_trainee && !isGrey) return false;
+          // 連勤チェック（夜・明が入るので +2 される。限界を超えないか）
+          if (getConsecutiveDays(s.id, idx) + 2 > 5) return false;
+          return true;
+        });
+
+        if (candidates.length > 0) {
+          let selected = null;
+          // 黒の日はリーダー優先
+          if (isBlack) {
+            const leader = candidates.find(c => c.is_leader);
+            selected = leader || candidates.find(c => !c.is_trainee); // リーダー不在なら実習生以外
+          } 
+          // グレーの日は実習生を優先（消化のため）
+          else if (isGrey) {
+            selected = candidates.find(c => c.is_trainee) || candidates[0];
+          } 
+          else {
+            // 普通の日は実習生以外からランダム（回数が少ない人優先）
+            candidates = candidates.filter(c => !c.is_trainee);
+            candidates.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
+            selected = candidates[0];
+          }
+
+          if (selected) {
+            schedule[selected.id][idx] = '夜';
+            nightCount[selected.id]++;
+            if (idx + 1 < dates.length) schedule[selected.id][idx + 1] = '明';
+            if (idx + 2 < dates.length) schedule[selected.id][idx + 2] = '休'; // 3日セット確定
+          }
+        }
+      });
+
+      // STEP 3: 早A, 早B, 日A, 遅 を配置
+      dates.forEach((d, idx) => {
+        const isSun = d.getDay() === 0;
+        
+        // その日空いているスタッフ
+        let available = currentStaffList.filter(s => !schedule[s.id][idx]);
+
+        // 早Bのカット判定（日曜で、残り空き人数が少ない場合）
+        let reqShifts = ['早A', '日A', '遅', '早B'];
+        if (isSun && available.length < 4) {
+            reqShifts = ['早A', '日A', '遅']; // 人手が足りなければ早Bを削る
+        }
+
+        reqShifts.forEach(shiftCode => {
+          if (available.length === 0) return;
+          
+          // 連勤が限界（夜勤あり5、なし3〜4）の人を避けるためのソート
+          available.sort((a, b) => {
+            const cA = getConsecutiveDays(a.id, idx);
+            const cB = getConsecutiveDays(b.id, idx);
+            return cA - cB; // 連勤が少ない人を優先
+          });
+
+          const selected = available.shift(); // 一番連勤が少ない人を取得
+          schedule[selected.id][idx] = shiftCode;
+        });
+
+        // 余った人は「休」にする
+        available.forEach(s => {
+          schedule[s.id][idx] = '休';
+        });
+      });
+
+
+      // --- テーブル描画 ---
+      let tableHTML = `<table><thead><tr><th style="min-width: 80px;">名前</th>`;
+      dates.forEach((d, idx) => {
+        const isGrey = (idx % 4 === 0);
+        const isBlack = (idx % 4 === 1);
+        const dayStr = ['日','月','火','水','木','金','土'][d.getDay()];
+        let cls = d.getDay() === 0 ? 'sunday' : d.getDay() === 6 ? 'saturday' : '';
+        let borderCls = isGrey ? 'grey-day' : isBlack ? 'black-day' : '';
+        
+        tableHTML += `<th class="${cls} ${borderCls}">${d.getDate()}<br><small>${dayStr}</small></th>`;
+      });
+      tableHTML += `</tr></thead><tbody>`;
+
+      currentStaffList.forEach(staff => {
+        tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:11px;">
+          ${staff.name} <br><span style="color:#666; font-size:9px;">夜:${nightCount[staff.id]}回</span>
+        </td>`;
+
+        dates.forEach((d, idx) => {
+          const shiftCode = schedule[staff.id][idx] || '未';
+          const isSun = d.getDay() === 0;
+          const isSat = d.getDay() === 6;
+          tableHTML += `<td class="shift-${shiftCode} ${isSun?'sunday':isSat?'saturday':''}">${shiftCode}</td>`;
+        });
+        tableHTML += `</tr>`;
+      });
+      tableHTML += `</tbody></table>`;
+
+      document.getElementById('shift-table-container').innerHTML = tableHTML;
+    });
+
     document.getElementById('staff-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-
-      const name = document.getElementById('name').value;
-      const is_leader = document.getElementById('is_leader').checked;
-      const is_trainee = document.getElementById('is_trainee').checked;
-      const can_night_shift = !document.getElementById('no_night_shift').checked;
-      const committee = document.getElementById('committee').value || null;
-
-      const { error } = await supabaseClient.from('staff').insert([
-        { name, is_leader, is_trainee, can_night_shift, committee }
-      ]);
-
-      if (error) {
-        alert('保存に失敗しました: ' + error.message);
-      } else {
-        alert('スタッフを保存しました！');
-        document.getElementById('staff-form').reset();
-        loadStaff();
-      }
+      const payload = {
+        name: document.getElementById('name').value,
+        is_leader: document.getElementById('is_leader').checked,
+        is_trainee: document.getElementById('is_trainee').checked,
+        can_night_shift: !document.getElementById('no_night_shift').checked,
+        committee: document.getElementById('committee').value || null
+      };
+      await supabaseClient.from('staff').insert([payload]);
+      document.getElementById('staff-form').reset();
+      loadData();
     });
 
-    // 5. 希望休の登録処理
     document.getElementById('holiday-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-
-      const staff_id = document.getElementById('holiday-staff').value;
-      const holiday_date = document.getElementById('holiday-date').value;
-
-      const { error } = await supabaseClient.from('requested_holidays').insert([
-        { staff_id, holiday_date }
-      ]);
-
-      if (error) {
-        alert('希望休の保存に失敗しました: ' + error.message);
-      } else {
-        alert('希望休を登録しました！');
-        document.getElementById('holiday-form').reset();
-        loadHolidays();
-      }
+      await supabaseClient.from('requested_holidays').insert([{
+        staff_id: document.getElementById('holiday-staff').value,
+        holiday_date: document.getElementById('holiday-date').value
+      }]);
+      document.getElementById('holiday-form').reset();
+      loadData();
     });
 
-    // 初期読み込み
-    loadStaff();
-    loadHolidays();
+    loadData();
   </script>
 </body>
 </html>
