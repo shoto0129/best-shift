@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (月またぎ・保存機能搭載版)</title>
+  <title>best-shift (シフト削除機能追加版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -98,7 +98,6 @@
     </section>
   </div>
 
-  <!-- シフト自動生成エリア -->
   <section class="card" style="border: 2px solid #28a745;">
     <h2>シフト自動生成 (16日〜翌15日)</h2>
     <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
@@ -112,15 +111,15 @@
     <div class="table-container" id="shift-table-container"></div>
   </section>
 
-  <!-- 過去のシフト確認エリア -->
   <section class="card" style="border: 2px solid #007bff;">
-    <h2>過去のシフトを閲覧</h2>
-    <div style="display: flex; gap: 15px; align-items: flex-end;">
+    <h2>過去のシフトを閲覧・削除</h2>
+    <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
       <div style="width: 200px;">
-        <label>閲覧したい月:</label>
+        <label>対象月:</label>
         <input type="month" id="past-shift-month">
       </div>
       <button type="button" id="btn-view-past">表示する</button>
+      <button type="button" id="btn-delete-past" style="background-color: #dc3545;">この月の保存シフトを削除</button>
     </div>
     <div class="table-container" id="past-shift-table-container"></div>
   </section>
@@ -171,9 +170,8 @@
       ).join('');
     }
 
-    // --- 月またぎ用の過去シフト取得関数 ---
     async function fetchPastShifts(startDate) {
-      const fromDate = new Date(startDate); fromDate.setDate(fromDate.getDate() - 10); // 過去10日分を取得
+      const fromDate = new Date(startDate); fromDate.setDate(fromDate.getDate() - 10);
       const toDate = new Date(startDate); toDate.setDate(toDate.getDate() - 1);
       const { data } = await supabaseClient.from('saved_shifts').select('*')
         .gte('shift_date', formatDate(fromDate)).lte('shift_date', formatDate(toDate));
@@ -182,7 +180,6 @@
       return past;
     }
 
-    // --- シフト自動生成 ---
     document.getElementById('btn-generate-shift').addEventListener('click', async () => {
       const selectedMonth = document.getElementById('shift-month').value;
       if (!selectedMonth || currentStaffList.length === 0) return alert('対象月を選択し、スタッフを登録してください');
@@ -202,16 +199,13 @@
       const nightCount = {};
       currentStaffList.forEach(s => { schedule[s.id] = {}; nightCount[s.id] = 0; });
 
-      // ★月またぎ・連勤計算ロジック
       const getConsecutiveDays = (staffId, dateIndex) => {
         let count = 0;
-        // 今月の配列から遡る
         for (let i = dateIndex - 1; i >= 0; i--) {
           const s = schedule[staffId][i];
           if (!s || s === '休') return count;
           count++;
         }
-        // DBの過去データから遡る
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
         while(true) {
           const s = pastShifts[staffId]?.[formatDate(d)];
@@ -222,7 +216,6 @@
         return count;
       };
 
-      // 1. 月またぎの夜勤セット適用 (15日が夜なら16明17休)
       currentStaffList.forEach(staff => {
         const d15 = new Date(startDate); d15.setDate(d15.getDate() - 1);
         const d14 = new Date(startDate); d14.setDate(d14.getDate() - 2);
@@ -237,7 +230,6 @@
         }
       });
 
-      // 2. 希望休の反映
       const holidayMap = {};
       currentHolidayList.forEach(h => holidayMap[`${h.staff_id}_${h.holiday_date}`] = true);
       dates.forEach((d, idx) => {
@@ -245,7 +237,6 @@
         currentStaffList.forEach(s => { if (holidayMap[`${s.id}_${dateStr}`]) schedule[s.id][idx] = '休'; });
       });
 
-      // 3. 2連休の強制確保 (1人1回)
       currentStaffList.forEach(staff => {
         let hasDouble = false;
         for (let i=0; i<dates.length-1; i++) { if (schedule[staff.id][i] === '休' && schedule[staff.id][i+1] === '休') hasDouble = true; }
@@ -258,19 +249,17 @@
         }
       });
 
-      // 4. 委員会の配置
       const committeeMap = {};
       currentCommitteeDays.forEach(c => committeeMap[c.committee_date] = c.committee_name);
       dates.forEach((d, idx) => {
         const cName = committeeMap[formatDate(d)];
         if (cName) {
           let assignee = currentStaffList.find(s => (s.committee || '').includes(cName) && schedule[s.id][idx] !== '休');
-          if (!assignee) assignee = currentStaffList.find(s => s.is_leader && schedule[s.id][idx] !== '休'); // 担当休ならリーダー
+          if (!assignee) assignee = currentStaffList.find(s => s.is_leader && schedule[s.id][idx] !== '休');
           if (assignee) schedule[assignee.id][idx] = '早A';
         }
       });
 
-      // 5. 夜勤の配置 (月5〜6回平準化)
       const nightStaffs = currentStaffList.filter(s => s.can_night_shift);
       const maxNightLimit = nightStaffs.length > 0 ? Math.ceil(dates.length / nightStaffs.length) : 0;
       dates.forEach((d, idx) => {
@@ -279,7 +268,6 @@
           if (!s.can_night_shift || nightCount[s.id] >= maxNightLimit) return false;
           if (schedule[s.id][idx] || (idx + 1 < dates.length && schedule[s.id][idx + 1])) return false;
           if (s.is_trainee && !isGrey) return false;
-          // ★夜勤前は連勤3日まで（夜明で5連勤になるため）
           if (getConsecutiveDays(s.id, idx) > 3) return false; 
           return true;
         });
@@ -306,43 +294,48 @@
         }
       });
 
-      // 6. 日勤と休みの配置
+      // 6. 日勤と休みの配置（夜勤ありは最大5連勤＝5連勤目が明けならOK）
       dates.forEach((d, idx) => {
         let reqShifts = d.getDay() === 0 ? ['早A', '日A', '遅'] : ['早A', '日A', '遅', '早B'];
-        reqShifts = reqShifts.filter(sc => !currentStaffList.some(s => schedule[s.id][idx] === sc)); // 委員会等で既に埋まっていれば除外
+        reqShifts = reqShifts.filter(sc => !currentStaffList.some(s => schedule[s.id][idx] === sc));
 
         let available = currentStaffList.filter(s => !schedule[s.id][idx]);
 
         reqShifts.forEach(shiftCode => {
           if (available.length === 0) return;
-          // 連勤チェック（夜あり5連勤、夜なし3連勤(最大4)）
+          
           let cands = available.filter(s => {
-            const limit = s.can_night_shift ? 4 : 3; // 今回割り当てると+1されるため
+            const limit = s.can_night_shift ? 5 : 3;
             return getConsecutiveDays(s.id, idx) < limit;
           });
-          // 候補がいなければルール緩和
-          if(cands.length === 0) cands = available.filter(s => getConsecutiveDays(s.id, idx) < (s.can_night_shift ? 5 : 4));
+          
+          if (cands.length === 0) {
+            let relaxLimit = s.can_night_shift ? 6 : 4;
+            cands = available.filter(s => getConsecutiveDays(s.id, idx) < relaxLimit);
+          }
+
+          if (cands.length === 0) {
+            available.sort((a, b) => getConsecutiveDays(a.id, idx) - getConsecutiveDays(b.id, idx));
+            cands = [available[0]];
+          }
           
           if (cands.length > 0) {
-            cands.sort((a,b) => getConsecutiveDays(a.id, idx) - getConsecutiveDays(b.id, idx));
+            cands.sort((a, b) => getConsecutiveDays(a.id, idx) - getConsecutiveDays(b.id, idx));
             const selected = cands[0];
             schedule[selected.id][idx] = shiftCode;
             available = available.filter(s => s.id !== selected.id);
           }
         });
         
-        // 余った人は休み（月9回の確保用）
         available.forEach(s => schedule[s.id][idx] = '休');
       });
 
-      // テーブル描画
       currentGeneratedSchedule = schedule;
       currentGeneratedDates = dates;
       renderTable('shift-table-container', dates, schedule);
       document.getElementById('btn-save-shift').style.display = 'inline-block';
     });
 
-    // --- シフト保存処理 ---
     document.getElementById('btn-save-shift').addEventListener('click', async () => {
       if (!currentGeneratedSchedule) return;
       if (!confirm('このシフトをデータベースに保存しますか？')) return;
@@ -357,12 +350,11 @@
       const { error } = await supabaseClient.from('saved_shifts').upsert(insertData, { onConflict: 'staff_id, shift_date' });
       if (error) alert('保存失敗: ' + error.message);
       else {
-        alert('保存完了！過去のシフトからいつでも確認でき、来月のシフト作成時の連勤計算に引き継がれます。');
+        alert('保存完了！');
         document.getElementById('btn-save-shift').style.display = 'none';
       }
     });
 
-    // --- 過去のシフト閲覧 ---
     document.getElementById('btn-view-past').addEventListener('click', async () => {
       const selectedMonth = document.getElementById('past-shift-month').value;
       if (!selectedMonth) return;
@@ -392,7 +384,32 @@
       renderTable('past-shift-table-container', dates, pastSchedule);
     });
 
-    // --- テーブル描画共通関数 ---
+    document.getElementById('btn-delete-past').addEventListener('click', async () => {
+      const selectedMonth = document.getElementById('past-shift-month').value;
+      if (!selectedMonth) return alert('対象月を選択してください');
+      if (!confirm(`${selectedMonth} (16日〜翌15日) の保存されたシフトをすべて削除しますか？`)) return;
+
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const startDate = new Date(year, month - 1, 16);
+      const dates = [];
+      for (let i = 0; i < 31; i++) {
+        const d = new Date(startDate); d.setDate(startDate.getDate() + i);
+        if (i > 0 && d.getDate() === 16) break; 
+        dates.push(d);
+      }
+
+      const { error } = await supabaseClient.from('saved_shifts').delete()
+        .gte('shift_date', formatDate(dates[0]))
+        .lte('shift_date', formatDate(dates[dates.length - 1]));
+
+      if (error) {
+        alert('削除失敗: ' + error.message);
+      } else {
+        alert('保存されたシフトを削除しました');
+        document.getElementById('past-shift-table-container').innerHTML = '';
+      }
+    });
+
     function renderTable(containerId, dates, schedule) {
       let tableHTML = `<table><thead><tr><th style="min-width: 80px;">名前</th>`;
       dates.forEach((d, idx) => {
@@ -421,7 +438,6 @@
       document.getElementById(containerId).innerHTML = tableHTML;
     }
 
-    // 削除関数等
     window.deleteStaff = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('saved_shifts').delete().eq('staff_id', id); await supabaseClient.from('requested_holidays').delete().eq('staff_id', id); await supabaseClient.from('staff').delete().eq('id', id); loadData(); };
     window.deleteHoliday = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('requested_holidays').delete().eq('id', id); loadData(); };
     window.deleteCommittee = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('committee_days').delete().eq('id', id); loadData(); };
