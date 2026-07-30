@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (削除機能付き)</title>
+  <title>best-shift (超・改善版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -12,13 +12,12 @@
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type="text"], input[type="date"], input[type="month"], select { width: 100%; padding: 8px; box-sizing: border-box; }
-    .checkbox-group { display: flex; gap: 15px; margin-top: 5px; }
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; }
     button { background-color: #007bff; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
     button:hover { background-color: #0056b3; }
     .btn-generate { background-color: #28a745; font-size: 16px; padding: 12px 20px; }
     .btn-generate:hover { background-color: #218838; }
     
-    /* 削除ボタン用のスタイル */
     .btn-delete { background-color: #dc3545; padding: 4px 8px; font-size: 11px; margin: 0; }
     .btn-delete:hover { background-color: #c82333; }
 
@@ -29,19 +28,21 @@
     .grid-container { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
     @media (max-width: 800px) { .grid-container { grid-template-columns: 1fr; } }
     
-    .shift-休 { background-color: #ffe6e6; color: #d9534f; font-weight: bold; }
-    .shift-夜 { background-color: #1d2124; color: #ffffff; font-weight: bold; }
-    .shift-明 { background-color: #e2e3e5; color: #383d41; font-weight: bold; }
-    .shift-早A { background-color: #fff3cd; color: #856404; font-weight: bold; }
-    .shift-早B { background-color: #ffe8a1; color: #856404; font-weight: bold; }
-    .shift-日A { background-color: #d4edda; color: #155724; font-weight: bold; }
-    .shift-遅 { background-color: #e6f2ff; color: #0275d8; font-weight: bold; }
-    .shift-未 { background-color: #ffcccc; color: #000; }
-    
+    /* 背景色の優先順位を修正（土日設定を先に書く） */
     .sunday { background-color: #fce8e6; }
     .saturday { background-color: #e6f2ff; }
     .grey-day { border-bottom: 4px solid gray; }
     .black-day { border-bottom: 4px solid black; }
+
+    /* シフトのスタイルには !important をつけて絶対に上書きさせる */
+    .shift-休 { background-color: #ffe6e6 !important; color: #d9534f; font-weight: bold; }
+    .shift-夜 { background-color: #1d2124 !important; color: #ffffff; font-weight: bold; }
+    .shift-明 { background-color: #e2e3e5 !important; color: #383d41; font-weight: bold; }
+    .shift-早A { background-color: #fff3cd !important; color: #856404; font-weight: bold; }
+    .shift-早B { background-color: #ffe8a1 !important; color: #856404; font-weight: bold; }
+    .shift-日A { background-color: #d4edda !important; color: #155724; font-weight: bold; }
+    .shift-遅 { background-color: #e6f2ff !important; color: #0275d8; font-weight: bold; }
+    .shift-未 { background-color: #ffcccc !important; color: #000; }
   </style>
 </head>
 <body>
@@ -65,16 +66,15 @@
           </div>
         </div>
         <div class="form-group">
-          <label for="committee">担当委員会:</label>
-          <select id="committee">
-            <option value="">なし</option>
-            <option value="事故防止委員会">事故防止委員会</option>
-            <option value="ユニットリーダー会議">ユニットリーダー会議</option>
-            <option value="サービス担当者会議">サービス担当者会議</option>
-            <option value="感染委員会">感染委員会</option>
-            <option value="行事委員会">行事委員会</option>
-            <option value="運営会議">運営会議</option>
-          </select>
+          <label>担当委員会 (複数選択OK):</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" name="committee" value="事故防止委員会"> 事故防止</label>
+            <label><input type="checkbox" name="committee" value="ユニットリーダー会議"> Uリーダー</label>
+            <label><input type="checkbox" name="committee" value="サービス担当者会議"> サ担</label>
+            <label><input type="checkbox" name="committee" value="感染委員会"> 感染</label>
+            <label><input type="checkbox" name="committee" value="行事委員会"> 行事</label>
+            <label><input type="checkbox" name="committee" value="運営会議"> 運営</label>
+          </div>
         </div>
         <button type="submit">保存</button>
       </form>
@@ -131,7 +131,6 @@
     <div class="table-container" id="shift-table-container"></div>
   </section>
 
-  <!-- 登録データ一覧 (削除ボタン追加) -->
   <section class="grid-container">
     <div>
       <h2>スタッフ一覧</h2>
@@ -177,19 +176,17 @@
       currentHolidayList = holidayData || [];
       currentCommitteeDays = committeeData || [];
 
-      // スタッフ一覧表示（削除ボタン付き）
       document.getElementById('staff-list').innerHTML = currentStaffList.map(p => 
         `<tr>
           <td>${p.name}</td>
           <td>${p.is_leader?'L':''}${p.is_trainee?'実':''}</td>
-          <td>${p.committee||'-'}</td>
+          <td style="font-size:10px;">${p.committee||'-'}</td>
           <td><button class="btn-delete" onclick="deleteStaff(${p.id})">削除</button></td>
         </tr>`
       ).join('');
       
       document.getElementById('holiday-staff').innerHTML = '<option value="">選択</option>' + currentStaffList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
       
-      // 希望休一覧表示（削除ボタン付き）
       document.getElementById('holiday-list').innerHTML = currentHolidayList.map(h => 
         `<tr>
           <td>${h.staff ? h.staff.name : ''}</td>
@@ -198,7 +195,6 @@
         </tr>`
       ).join('');
 
-      // 委員会予定一覧表示（削除ボタン付き）
       document.getElementById('committee-list').innerHTML = currentCommitteeDays.map(c => 
         `<tr>
           <td>${c.committee_name}</td>
@@ -208,12 +204,9 @@
       ).join('');
     }
 
-    // --- 削除機能 ---
     window.deleteStaff = async function(id) {
       if(!confirm('本当にこのスタッフを削除しますか？\n※関連する「希望休」も一緒に削除されます。')) return;
-      // データベースのエラーを防ぐため、先にこの人の希望休を消す
       await supabaseClient.from('requested_holidays').delete().eq('staff_id', id);
-      // その後にスタッフを消す
       await supabaseClient.from('staff').delete().eq('id', id);
       loadData();
     };
@@ -274,13 +267,17 @@
         });
       });
 
+      // 夜勤の平準化（動的な上限の計算）
+      const nightStaffCount = currentStaffList.filter(s => s.can_night_shift).length;
+      const maxNightLimit = nightStaffCount > 0 ? Math.ceil(dates.length / nightStaffCount) : 0;
+
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0); 
         const isBlack = (idx % 4 === 1);
 
         let candidates = currentStaffList.filter(s => {
           if (!s.can_night_shift) return false;
-          if (nightCount[s.id] >= 6) return false; 
+          if (nightCount[s.id] >= maxNightLimit) return false; // 動的上限でブロック
           if (schedule[s.id][idx] === '休') return false; 
           if (idx + 1 < dates.length && schedule[s.id][idx + 1]) return false;
           if (s.is_trainee && !isGrey) return false;
@@ -290,15 +287,21 @@
 
         if (candidates.length > 0) {
           let selected = null;
+          // ルールに合う人の中でも「一番夜勤が少ない人」を優先して選ぶ
           if (isBlack) {
-            const leader = candidates.find(c => c.is_leader);
-            selected = leader || candidates.find(c => !c.is_trainee);
+            let sub = candidates.filter(c => c.is_leader);
+            if(sub.length === 0) sub = candidates.filter(c => !c.is_trainee);
+            sub.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
+            selected = sub[0];
           } else if (isGrey) {
-            selected = candidates.find(c => c.is_trainee) || candidates[0];
+            let sub = candidates.filter(c => c.is_trainee);
+            if(sub.length === 0) sub = candidates;
+            sub.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
+            selected = sub[0];
           } else {
-            candidates = candidates.filter(c => !c.is_trainee);
-            candidates.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
-            selected = candidates[0];
+            let sub = candidates.filter(c => !c.is_trainee);
+            sub.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
+            selected = sub[0];
           }
 
           if (selected) {
@@ -315,7 +318,8 @@
         const todayCommittee = committeeMap[dateStr];
 
         if (todayCommittee) {
-          let assignee = currentStaffList.find(s => s.committee === todayCommittee && !schedule[s.id][idx]);
+          // 複数登録されている委員会から合致する人を探す (.includes を使用)
+          let assignee = currentStaffList.find(s => (s.committee || '').includes(todayCommittee) && !schedule[s.id][idx]);
           if (!assignee) {
             assignee = currentStaffList.find(s => s.is_leader && !schedule[s.id][idx]);
           }
@@ -350,6 +354,7 @@
         });
       });
 
+      // テーブル作成
       let tableHTML = `<table><thead><tr><th style="min-width: 80px;">名前</th>`;
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0);
@@ -359,33 +364,46 @@
         let borderCls = isGrey ? 'grey-day' : isBlack ? 'black-day' : '';
         tableHTML += `<th class="${cls} ${borderCls}">${d.getDate()}<br><small>${dayStr}</small></th>`;
       });
-      tableHTML += `</tr></thead><tbody>`;
+      // 右端に集計用のヘッダーを追加
+      tableHTML += `<th style="min-width: 140px;">シフト集計</th></tr></thead><tbody>`;
 
       currentStaffList.forEach(staff => {
-        tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:11px;">
-          ${staff.name} <br><span style="color:#666; font-size:9px;">夜:${nightCount[staff.id]}回</span>
-        </td>`;
+        tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:12px;">${staff.name}</td>`;
+        
+        // 各シフトの回数を数える用の箱
+        const counts = { '早A': 0, '早B': 0, '日A': 0, '遅': 0, '夜': 0, '明': 0, '休': 0 };
+
         dates.forEach((d, idx) => {
           const shiftCode = schedule[staff.id][idx] || '未';
+          if (counts[shiftCode] !== undefined) counts[shiftCode]++; // 出現したシフトをカウント
           const isSun = d.getDay() === 0;
           const isSat = d.getDay() === 6;
           tableHTML += `<td class="shift-${shiftCode} ${isSun?'sunday':isSat?'saturday':''}">${shiftCode}</td>`;
         });
-        tableHTML += `</tr>`;
+
+        // 右端に集計結果を表示
+        tableHTML += `<td style="font-size:11px; text-align:left; line-height:1.5;">
+          早A:${counts['早A']} / 早B:${counts['早B']} / 日A:${counts['日A']} / 遅:${counts['遅']}<br>
+          夜:${counts['夜']} / 明:${counts['明']} / 休:${counts['休']}
+        </td></tr>`;
       });
       tableHTML += `</tbody></table>`;
 
       document.getElementById('shift-table-container').innerHTML = tableHTML;
     });
 
+    // スタッフ登録時：チェックボックスの複数選択をカンマ区切りで保存
     document.getElementById('staff-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      
+      const committees = Array.from(document.querySelectorAll('input[name="committee"]:checked')).map(cb => cb.value);
+      
       const payload = {
         name: document.getElementById('name').value,
         is_leader: document.getElementById('is_leader').checked,
         is_trainee: document.getElementById('is_trainee').checked,
         can_night_shift: !document.getElementById('no_night_shift').checked,
-        committee: document.getElementById('committee').value || null
+        committee: committees.join(',') || null
       };
       await supabaseClient.from('staff').insert([payload]);
       document.getElementById('staff-form').reset();
