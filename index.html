@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (期間連動＆新着上部表示)</title>
+  <title>best-shift (連勤ルール厳格化対応)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -163,15 +163,13 @@
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     }
 
-    // 対象月からシフトの期間（開始日・終了日）を計算して返す関数
     function getShiftRange(monthInputVal) {
       const [year, month] = monthInputVal.split('-').map(Number);
       const startDate = new Date(year, month - 1, 16);
-      const endDate = new Date(year, month, 15); // 翌月15日
+      const endDate = new Date(year, month, 15);
       return { startDate, endDate };
     }
 
-    // 対象月の変更や初期化時に、カレンダーの min/max と表示ラベルを更新する関数
     function updateDateConstraints() {
       const monthVal = document.getElementById('shift-month').value;
       if (!monthVal) return;
@@ -180,7 +178,6 @@
       const startStr = formatDate(startDate);
       const endStr = formatDate(endDate);
 
-      // 希望休と委員会のカレンダー入力範囲を制限
       document.getElementById('holiday-date-1').min = startStr;
       document.getElementById('holiday-date-1').max = endStr;
       document.getElementById('holiday-date-2').min = startStr;
@@ -188,7 +185,6 @@
       document.getElementById('committee-date').min = startStr;
       document.getElementById('committee-date').max = endStr;
 
-      // 初期値として、もし空か範囲外なら開始日をセット
       if (!document.getElementById('holiday-date-1').value || document.getElementById('holiday-date-1').value < startStr || document.getElementById('holiday-date-1').value > endStr) {
         document.getElementById('holiday-date-1').value = startStr;
       }
@@ -196,7 +192,6 @@
         document.getElementById('committee-date').value = startStr;
       }
 
-      // わかりやすい期間ラベルを表示 (例: 9/16 〜 10/15)
       const labelText = `（${startDate.getMonth() + 1}/${startDate.getDate()} 〜 ${endDate.getMonth() + 1}/${endDate.getDate()}）`;
       document.getElementById('shift-period-label').textContent = labelText;
     }
@@ -204,7 +199,6 @@
     document.getElementById('shift-month').addEventListener('change', updateDateConstraints);
 
     async function loadData() {
-      // 取得時に新しい順（降順）に並び替えるようクエリを修正
       const { data: staffData } = await supabaseClient.from('staff').select('*').order('id', { ascending: false });
       const { data: holidayData } = await supabaseClient.from('requested_holidays').select('*, staff(name)').order('id', { ascending: false });
       const { data: committeeData } = await supabaseClient.from('committee_days').select('*').order('committee_date', { ascending: false });
@@ -225,7 +219,6 @@
       ).join('');
     }
 
-    // スタッフ情報の保存処理
     document.getElementById('staff-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = document.getElementById('name').value;
@@ -248,7 +241,6 @@
       }
     });
 
-    // 希望休の保存処理（最大2日同時保存）
     document.getElementById('holiday-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const staffId = document.getElementById('holiday-staff').value;
@@ -270,12 +262,11 @@
         alert('希望休を保存しました！');
         document.getElementById('holiday-date-1').value = '';
         document.getElementById('holiday-date-2').value = '';
-        updateDateConstraints(); // 期間リセット
+        updateDateConstraints();
         loadData();
       }
     });
 
-    // 委員会の保存処理
     document.getElementById('committee-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const cName = document.getElementById('committee-name').value;
@@ -290,7 +281,7 @@
       else {
         alert('委員会の予定を保存しました！');
         e.target.reset();
-        updateDateConstraints(); // 期間リセット
+        updateDateConstraints();
         loadData();
       }
     });
@@ -327,7 +318,7 @@
       let bestScore = Infinity;
       let bestSchedule = null;
 
-      for (let attempt = 0; attempt < 500; attempt++) {
+      for (let attempt = 0; attempt < 1000; attempt++) {
         let { schedule, score } = generateSingleSchedule(dates, currentStaffList, holidayMap, committeeMap, pastShifts, startDate);
         if (score < bestScore) {
           bestScore = score;
@@ -384,7 +375,7 @@
         }
       });
 
-      // 4. 夜勤の配置 (夜回数が少ない人を優先して均等化)
+      // 4. 夜勤の配置
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0);
         const isBlack = (idx % 4 === 1);
@@ -477,27 +468,33 @@
         });
       });
 
-      // 7. ペナルティ評価
+      // 7. ペナルティ評価（連勤ルールの厳格適用：明けや休以外は出勤扱い＝連続勤務日数にカウント）
       staffs.forEach(s => {
         let conseq = 0;
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
         while(true) {
           let pastCode = pastShifts[s.id]?.[formatDate(d)];
           if (!pastCode || pastCode === '休' || pastCode === '未') break;
-          conseq++;
+          conseq++; // 明けなども含めてカウント
           d.setDate(d.getDate() - 1);
-          if (conseq > 15) break;
+          if (conseq > 10) break;
         }
 
         for (let i = 0; i < dates.length; i++) {
-          if (schedule[s.id][i] === '休') {
+          let code = schedule[s.id][i];
+          // 「休」以外（日勤、早番、遅番、夜勤、明）はすべて出勤・勤務扱いとして連勤に含める
+          if (code === '休') {
             conseq = 0;
           } else {
             conseq++;
-            let limit = s.can_night_shift ? 5 : 3;
-            if (conseq > limit) {
-              score += (conseq - limit) * 100; 
-              if (!s.can_night_shift && conseq === 4) score -= 80; 
+            let maxLimit = s.can_night_shift ? 5 : 3; // 夜勤する人は最大5連勤、夜勤しない人は最大3連勤
+            if (conseq > maxLimit) {
+              // 制限を超えた場合のペナルティ（夜勤不可の人が4連勤になった場合は許容度を持たせるが、5連勤以上は極端に重いペナルティ）
+              if (!s.can_night_shift && conseq === 4) {
+                score += 500; // 「どうしても無理なら4連勤」は許容するが、3連勤よりはペナルティを与える
+              } else {
+                score += (conseq - maxLimit) * 5000; 
+              }
             }
           }
         }
@@ -615,7 +612,6 @@
     window.deleteHoliday = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('requested_holidays').delete().eq('id', id); loadData(); };
     window.deleteCommittee = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('committee_days').delete().eq('id', id); loadData(); };
 
-    // 初期化実行
     updateDateConstraints();
     loadData();
   </script>
