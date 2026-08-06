@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (高精度シフト生成版)</title>
+  <title>best-shift (高精度シフト生成＆機能完全版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -74,11 +74,24 @@
       </form>
     </section>
 
+    <!-- 希望休登録フォーム（2日分入力対応） -->
     <section class="card">
-      <h2>2. 希望休の登録</h2>
+      <h2>2. 希望休の登録 (最大2日)</h2>
       <form id="holiday-form">
-        <div class="form-group"><label for="holiday-staff">スタッフ:</label><select id="holiday-staff" required><option value="">選択</option></select></div>
-        <div class="form-group"><label for="holiday-date">希望日:</label><input type="date" id="holiday-date" required></div>
+        <div class="form-group">
+          <label for="holiday-staff">スタッフ:</label>
+          <select id="holiday-staff" required><option value="">選択</option></select>
+        </div>
+        <div class="form-group" style="display: flex; gap: 10px;">
+          <div style="flex: 1;">
+            <label for="holiday-date-1">希望日1 (必須):</label>
+            <input type="date" id="holiday-date-1" required>
+          </div>
+          <div style="flex: 1;">
+            <label for="holiday-date-2">希望日2 (任意):</label>
+            <input type="date" id="holiday-date-2">
+          </div>
+        </div>
         <button type="submit">保存</button>
       </form>
     </section>
@@ -170,6 +183,74 @@
       ).join('');
     }
 
+    // ★追加: スタッフ情報の保存処理
+    document.getElementById('staff-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('name').value;
+      const is_leader = document.getElementById('is_leader').checked;
+      const is_trainee = document.getElementById('is_trainee').checked;
+      const can_night_shift = !document.getElementById('no_night_shift').checked; // 夜勤不可チェックの逆
+      
+      const committeeCheckboxes = document.querySelectorAll('input[name="committee"]:checked');
+      const committees = Array.from(committeeCheckboxes).map(cb => cb.value).join(',');
+
+      const { error } = await supabaseClient.from('staff').insert([{
+        name, is_leader, is_trainee, can_night_shift, committee: committees
+      }]);
+      
+      if (error) alert('保存エラー: ' + error.message);
+      else {
+        alert('スタッフを追加しました！');
+        e.target.reset();
+        loadData();
+      }
+    });
+
+    // ★追加・変更: 希望休の保存処理（最大2日同時保存）
+    document.getElementById('holiday-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const staffId = document.getElementById('holiday-staff').value;
+      const date1 = document.getElementById('holiday-date-1').value;
+      const date2 = document.getElementById('holiday-date-2').value;
+
+      if (!staffId || !date1) return;
+
+      const inserts = [{ staff_id: staffId, holiday_date: date1 }];
+      if (date2) {
+        inserts.push({ staff_id: staffId, holiday_date: date2 });
+      }
+
+      const { error } = await supabaseClient.from('requested_holidays').insert(inserts);
+      
+      if (error) {
+        alert('保存エラー: ' + error.message);
+      } else {
+        alert('希望休を保存しました！');
+        document.getElementById('holiday-date-1').value = '';
+        document.getElementById('holiday-date-2').value = '';
+        loadData();
+      }
+    });
+
+    // ★追加: 委員会の保存処理
+    document.getElementById('committee-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const cName = document.getElementById('committee-name').value;
+      const cDate = document.getElementById('committee-date').value;
+      if(!cName || !cDate) return;
+
+      const { error } = await supabaseClient.from('committee_days').insert([{
+        committee_name: cName, committee_date: cDate
+      }]);
+      
+      if (error) alert('保存エラー: ' + error.message);
+      else {
+        alert('委員会の予定を保存しました！');
+        e.target.reset();
+        loadData();
+      }
+    });
+
     async function fetchPastShifts(startDate) {
       const fromDate = new Date(startDate); fromDate.setDate(fromDate.getDate() - 15); // 月またぎ連勤計算のため15日前まで取得
       const toDate = new Date(startDate); toDate.setDate(toDate.getDate() - 1);
@@ -200,7 +281,7 @@
       const committeeMap = {};
       currentCommitteeDays.forEach(c => committeeMap[c.committee_date] = c.committee_name);
 
-      // ★ モンテカルロ法：500回ランダムにシフトを生成し、最もペナルティの少ない（最適な）シフトを採用する
+      // モンテカルロ法：500回ランダムにシフトを生成し、最もペナルティの少ない（最適な）シフトを採用する
       let bestScore = Infinity;
       let bestSchedule = null;
 
@@ -400,7 +481,6 @@
       return { schedule, score };
     }
 
-    // （以下、保存や過去シフト表示の関数は元のまま）
     document.getElementById('btn-save-shift').addEventListener('click', async () => {
       if (!currentGeneratedSchedule) return;
       if (!confirm('このシフトをデータベースに保存しますか？')) return;
