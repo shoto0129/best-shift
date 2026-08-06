@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (夜勤均等化＆希望休2日対応完全版)</title>
+  <title>best-shift</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -84,11 +84,11 @@
         </div>
         <div class="form-group" style="display: flex; gap: 10px;">
           <div style="flex: 1;">
-            <label for="holiday-date-1">希望日1 (必須):</label>
+            <label for="holiday-date-1">希望日1:</label>
             <input type="date" id="holiday-date-1" required>
           </div>
           <div style="flex: 1;">
-            <label for="holiday-date-2">希望日2 (任意):</label>
+            <label for="holiday-date-2">希望日2:</label>
             <input type="date" id="holiday-date-2">
           </div>
         </div>
@@ -114,8 +114,8 @@
   <section class="card" style="border: 2px solid #28a745;">
     <h2>シフト自動生成 (16日〜翌15日)</h2>
     <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-      <div style="flex: 1; min-width: 200px;">
-        <label>対象月 (例: 8月を選ぶと 8/16〜9/15):</label>
+      <div style="flex: 1; min-width: 220px;">
+        <label for="shift-month">対象月: <span id="shift-period-label" style="color: #007bff; font-weight: normal;"></span></label>
         <input type="month" id="shift-month" required>
       </div>
       <button type="button" class="btn-generate" id="btn-generate-shift">シフト作成を実行</button>
@@ -155,12 +155,53 @@
     let currentGeneratedDates = null;
 
     const today = new Date();
-    document.getElementById('shift-month').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    document.getElementById('past-shift-month').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const defaultMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    document.getElementById('shift-month').value = defaultMonthStr;
+    document.getElementById('past-shift-month').value = defaultMonthStr;
 
     function formatDate(date) {
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     }
+
+    // 対象月からシフトの期間（開始日・終了日）を計算して返す関数
+    function getShiftRange(monthInputVal) {
+      const [year, month] = monthInputVal.split('-').map(Number);
+      const startDate = new Date(year, month - 1, 16);
+      const endDate = new Date(year, month, 15); // 翌月15日
+      return { startDate, endDate };
+    }
+
+    // 対象月の変更や初期化時に、カレンダーの min/max と表示ラベルを更新する関数
+    function updateDateConstraints() {
+      const monthVal = document.getElementById('shift-month').value;
+      if (!monthVal) return;
+
+      const { startDate, endDate } = getShiftRange(monthVal);
+      const startStr = formatDate(startDate);
+      const endStr = formatDate(endDate);
+
+      // 希望休と委員会のカレンダー入力範囲を制限
+      document.getElementById('holiday-date-1').min = startStr;
+      document.getElementById('holiday-date-1').max = endStr;
+      document.getElementById('holiday-date-2').min = startStr;
+      document.getElementById('holiday-date-2').max = endStr;
+      document.getElementById('committee-date').min = startStr;
+      document.getElementById('committee-date').max = endStr;
+
+      // 初期値として、もし空か範囲外なら開始日をセット
+      if (!document.getElementById('holiday-date-1').value || document.getElementById('holiday-date-1').value < startStr || document.getElementById('holiday-date-1').value > endStr) {
+        document.getElementById('holiday-date-1').value = startStr;
+      }
+      if (!document.getElementById('committee-date').value || document.getElementById('committee-date').value < startStr || document.getElementById('committee-date').value > endStr) {
+        document.getElementById('committee-date').value = startStr;
+      }
+
+      // わかりやすい期間ラベルを表示 (例: 9/16 〜 10/15)
+      const labelText = `（${startDate.getMonth() + 1}/${startDate.getDate()} 〜 ${endDate.getMonth() + 1}/${endDate.getDate()}）`;
+      document.getElementById('shift-period-label').textContent = labelText;
+    }
+
+    document.getElementById('shift-month').addEventListener('change', updateDateConstraints);
 
     async function loadData() {
       const { data: staffData } = await supabaseClient.from('staff').select('*').order('id');
@@ -228,6 +269,7 @@
         alert('希望休を保存しました！');
         document.getElementById('holiday-date-1').value = '';
         document.getElementById('holiday-date-2').value = '';
+        updateDateConstraints(); // 期間リセット
         loadData();
       }
     });
@@ -247,6 +289,7 @@
       else {
         alert('委員会の予定を保存しました！');
         e.target.reset();
+        updateDateConstraints(); // 期間リセット
         loadData();
       }
     });
@@ -266,8 +309,7 @@
       if (!selectedMonth || currentStaffList.length === 0) return alert('対象月を選択し、スタッフを登録してください');
       document.getElementById('btn-save-shift').style.display = 'none';
 
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const startDate = new Date(year, month - 1, 16);
+      const { startDate } = getShiftRange(selectedMonth);
       const dates = [];
       for (let i = 0; i < 31; i++) {
         const d = new Date(startDate); d.setDate(startDate.getDate() + i);
@@ -364,7 +406,6 @@
         }
 
         if (cands.length > 0) {
-          // 夜勤回数が少ない人を優先選択するロジック
           cands = shuffle(cands);
           cands.sort((a, b) => {
              let aNights = schedule[a.id].filter(x => x === '夜').length;
@@ -461,13 +502,13 @@
         }
       });
       
-      // 夜勤回数のバラツキ評価（厳格化）
+      // 夜勤回数のバラツキ評価
       let nightCounts = staffs.filter(s => s.can_night_shift).map(s => schedule[s.id].filter(x => x === '夜').length);
       if (nightCounts.length > 0) {
         let maxN = Math.max(...nightCounts);
         let minN = Math.min(...nightCounts);
-        if (maxN - minN > 2) score += 10000; // 差が3以上は即ボツ
-        if (maxN - minN > 1) score += 2000;  // 差が2も極力避ける
+        if (maxN - minN > 2) score += 10000;
+        if (maxN - minN > 1) score += 2000;
       }
 
       return { schedule, score };
@@ -495,8 +536,7 @@
     document.getElementById('btn-view-past').addEventListener('click', async () => {
       const selectedMonth = document.getElementById('past-shift-month').value;
       if (!selectedMonth) return;
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const startDate = new Date(year, month - 1, 16);
+      const { startDate } = getShiftRange(selectedMonth);
       const dates = [];
       for (let i = 0; i < 31; i++) {
         const d = new Date(startDate); d.setDate(startDate.getDate() + i);
@@ -526,8 +566,7 @@
       if (!selectedMonth) return alert('対象月を選択してください');
       if (!confirm(`${selectedMonth} (16日〜翌15日) の保存されたシフトをすべて削除しますか？`)) return;
 
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const startDate = new Date(year, month - 1, 16);
+      const { startDate } = getShiftRange(selectedMonth);
       const dates = [];
       for (let i = 0; i < 31; i++) {
         const d = new Date(startDate); d.setDate(startDate.getDate() + i);
@@ -575,6 +614,8 @@
     window.deleteHoliday = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('requested_holidays').delete().eq('id', id); loadData(); };
     window.deleteCommittee = async function(id) { if(!confirm('削除しますか？')) return; await supabaseClient.from('committee_days').delete().eq('id', id); loadData(); };
 
+    // 初期化実行
+    updateDateConstraints();
     loadData();
   </script>
 </body>
