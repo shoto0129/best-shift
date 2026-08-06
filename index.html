@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (連勤ルール厳格化対応)</title>
+  <title>best-shift (最大連勤数表示対応)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -74,7 +74,6 @@
       </form>
     </section>
 
-    <!-- 希望休登録フォーム（2日分入力対応） -->
     <section class="card">
       <h2>2. 希望休の登録 (最大2日)</h2>
       <form id="holiday-form">
@@ -153,6 +152,7 @@
     let currentCommitteeDays = [];
     let currentGeneratedSchedule = null;
     let currentGeneratedDates = null;
+    let currentPastShiftsMap = {}; // 連勤計算用に保持
 
     const today = new Date();
     const defaultMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
@@ -250,15 +250,12 @@
       if (!staffId || !date1) return;
 
       const inserts = [{ staff_id: staffId, holiday_date: date1 }];
-      if (date2) {
-        inserts.push({ staff_id: staffId, holiday_date: date2 });
-      }
+      if (date2) inserts.push({ staff_id: staffId, holiday_date: date2 });
 
       const { error } = await supabaseClient.from('requested_holidays').insert(inserts);
       
-      if (error) {
-        alert('保存エラー: ' + error.message);
-      } else {
+      if (error) alert('保存エラー: ' + error.message);
+      else {
         alert('希望休を保存しました！');
         document.getElementById('holiday-date-1').value = '';
         document.getElementById('holiday-date-2').value = '';
@@ -310,6 +307,7 @@
       }
 
       const pastShifts = await fetchPastShifts(startDate);
+      currentPastShiftsMap = pastShifts; // 保持
       const holidayMap = {};
       currentHolidayList.forEach(h => holidayMap[`${h.staff_id}_${h.holiday_date}`] = true);
       const committeeMap = {};
@@ -329,7 +327,7 @@
 
       currentGeneratedSchedule = bestSchedule;
       currentGeneratedDates = dates;
-      renderTable('shift-table-container', dates, bestSchedule);
+      renderTable('shift-table-container', dates, bestSchedule, pastShifts, startDate);
       document.getElementById('btn-save-shift').style.display = 'inline-block';
     });
 
@@ -339,7 +337,6 @@
       let score = 0;
       const shuffle = (arr) => arr.slice().sort(() => Math.random() - 0.5);
 
-      // 1. 前月末からの夜勤の引き継ぎ
       staffs.forEach(staff => {
         const d15 = new Date(startDate); d15.setDate(d15.getDate() - 1);
         const d14 = new Date(startDate); d14.setDate(d14.getDate() - 2);
@@ -354,7 +351,6 @@
         }
       });
 
-      // 2. 希望休の固定
       dates.forEach((d, idx) => {
         const dateStr = formatDate(d);
         staffs.forEach(s => {
@@ -362,20 +358,16 @@
         });
       });
 
-      // 3. 委員会の固定
       dates.forEach((d, idx) => {
         const dateStr = formatDate(d);
         const cName = committeeMap[dateStr];
         if (cName) {
           let cands = staffs.filter(s => (s.committee || '').includes(cName) && schedule[s.id][idx] !== '休');
           if (cands.length === 0) cands = staffs.filter(s => s.is_leader && schedule[s.id][idx] !== '休');
-          if (cands.length > 0) {
-            schedule[shuffle(cands)[0].id][idx] = '早A';
-          }
+          if (cands.length > 0) schedule[shuffle(cands)[0].id][idx] = '早A';
         }
       });
 
-      // 4. 夜勤の配置
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0);
         const isBlack = (idx % 4 === 1);
@@ -399,12 +391,7 @@
 
         if (cands.length > 0) {
           cands = shuffle(cands);
-          cands.sort((a, b) => {
-             let aNights = schedule[a.id].filter(x => x === '夜').length;
-             let bNights = schedule[b.id].filter(x => x === '夜').length;
-             return aNights - bNights;
-          });
-          
+          cands.sort((a, b) => schedule[a.id].filter(x => x === '夜').length - schedule[b.id].filter(x => x === '夜').length);
           let chosen = cands[0];
           schedule[chosen.id][idx] = '夜';
           if (idx + 1 < dates.length) schedule[chosen.id][idx+1] = '明';
@@ -414,7 +401,6 @@
         }
       });
 
-      // 5. 休み(公休)の割り振り
       staffs.forEach(s => {
         let currentOffs = schedule[s.id].filter(x => x === '休').length;
         let neededOffs = 9 - currentOffs;
@@ -446,7 +432,6 @@
         }
       });
 
-      // 6. 日勤の配置
       dates.forEach((d, idx) => {
         let reqShifts = d.getDay() === 0 ? ['早A', '日A', '遅'] : ['早A', '日A', '遅', '早B'];
         reqShifts = reqShifts.filter(shiftCode => !staffs.some(s => schedule[s.id][idx] === shiftCode));
@@ -455,11 +440,8 @@
         available = shuffle(available);
         
         reqShifts.forEach(shiftCode => {
-          if (available.length > 0) {
-            schedule[available.pop().id][idx] = shiftCode;
-          } else {
-            score += 1000;
-          }
+          if (available.length > 0) schedule[available.pop().id][idx] = shiftCode;
+          else score += 1000;
         });
         
         const extraShifts = ['早A', '早B', '日A', '遅'];
@@ -468,39 +450,32 @@
         });
       });
 
-      // 7. ペナルティ評価（連勤ルールの厳格適用：明けや休以外は出勤扱い＝連続勤務日数にカウント）
       staffs.forEach(s => {
         let conseq = 0;
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
         while(true) {
           let pastCode = pastShifts[s.id]?.[formatDate(d)];
           if (!pastCode || pastCode === '休' || pastCode === '未') break;
-          conseq++; // 明けなども含めてカウント
+          conseq++;
           d.setDate(d.getDate() - 1);
           if (conseq > 10) break;
         }
 
         for (let i = 0; i < dates.length; i++) {
           let code = schedule[s.id][i];
-          // 「休」以外（日勤、早番、遅番、夜勤、明）はすべて出勤・勤務扱いとして連勤に含める
           if (code === '休') {
             conseq = 0;
           } else {
             conseq++;
-            let maxLimit = s.can_night_shift ? 5 : 3; // 夜勤する人は最大5連勤、夜勤しない人は最大3連勤
+            let maxLimit = s.can_night_shift ? 5 : 3;
             if (conseq > maxLimit) {
-              // 制限を超えた場合のペナルティ（夜勤不可の人が4連勤になった場合は許容度を持たせるが、5連勤以上は極端に重いペナルティ）
-              if (!s.can_night_shift && conseq === 4) {
-                score += 500; // 「どうしても無理なら4連勤」は許容するが、3連勤よりはペナルティを与える
-              } else {
-                score += (conseq - maxLimit) * 5000; 
-              }
+              if (!s.can_night_shift && conseq === 4) score += 500; 
+              else score += (conseq - maxLimit) * 5000; 
             }
           }
         }
       });
       
-      // 夜勤回数のバラツキ評価
       let nightCounts = staffs.filter(s => s.can_night_shift).map(s => schedule[s.id].filter(x => x === '夜').length);
       if (nightCounts.length > 0) {
         let maxN = Math.max(...nightCounts);
@@ -556,7 +531,8 @@
         }
       });
 
-      renderTable('past-shift-table-container', dates, pastSchedule);
+      const pastShifts = await fetchPastShifts(startDate);
+      renderTable('past-shift-table-container', dates, pastSchedule, pastShifts, startDate);
     });
 
     document.getElementById('btn-delete-past').addEventListener('click', async () => {
@@ -580,7 +556,38 @@
       else { alert('削除しました'); document.getElementById('past-shift-table-container').innerHTML = ''; }
     });
 
-    function renderTable(containerId, dates, schedule) {
+    // 最大連勤数を計算するヘルパー関数
+    function calculateMaxConsecutive(staffId, dates, schedule, pastShifts, startDate) {
+      let maxConseq = 0;
+      let conseq = 0;
+
+      // 前月末の連続状態を引き継ぎ計算
+      let d = new Date(startDate); d.setDate(d.getDate() - 1);
+      let pastList = [];
+      while(true) {
+        let pastCode = pastShifts[staffId]?.[formatDate(d)];
+        if (!pastCode || pastCode === '休' || pastCode === '未') break;
+        pastList.unshift(pastCode);
+        d.setDate(d.getDate() - 1);
+        if (pastList.length > 10) break;
+      }
+      conseq = pastList.length;
+      if (conseq > maxConseq) maxConseq = conseq;
+
+      // 対象期間内の連勤をカウント
+      for (let i = 0; i < dates.length; i++) {
+        let code = schedule[staffId]?.[i] || '未';
+        if (code === '休') {
+          conseq = 0;
+        } else {
+          conseq++;
+          if (conseq > maxConseq) maxConseq = conseq;
+        }
+      }
+      return maxConseq;
+    }
+
+    function renderTable(containerId, dates, schedule, pastShifts, startDate) {
       let tableHTML = `<table><thead><tr><th style="min-width: 80px;">名前</th>`;
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0); const isBlack = (idx % 4 === 1);
@@ -589,7 +596,7 @@
         let borderCls = isGrey ? 'grey-day' : isBlack ? 'black-day' : '';
         tableHTML += `<th class="${cls} ${borderCls}">${d.getDate()}<br><small>${dayStr}</small></th>`;
       });
-      tableHTML += `<th style="min-width: 140px;">シフト集計</th></tr></thead><tbody>`;
+      tableHTML += `<th style="min-width: 150px;">シフト集計</th></tr></thead><tbody>`;
 
       currentStaffList.forEach(staff => {
         tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:12px;">${staff.name}</td>`;
@@ -600,8 +607,15 @@
           const isSun = d.getDay() === 0; const isSat = d.getDay() === 6;
           tableHTML += `<td class="shift-${shiftCode} ${isSun?'sunday':isSat?'saturday':''}">${shiftCode}</td>`;
         });
+
+        // 最大連勤数を計算
+        const maxConseq = calculateMaxConsecutive(staff.id, dates, schedule, pastShifts || currentPastShiftsMap, startDate);
+        const limit = staff.can_night_shift ? 5 : 4; // 警告判定用（夜勤ありは5、なしは4超で色を変えるなど視覚化も可能）
+        const conseqColor = maxConseq > limit ? 'color: red; font-weight: bold;' : '';
+
         tableHTML += `<td style="font-size:11px; text-align:left; line-height:1.5;">
-          早A:${counts['早A']} / 早B:${counts['早B']} / 日A:${counts['日A']} / 遅:${counts['遅']}<br>夜:${counts['夜']} / 明:${counts['明']} / 休:${counts['休']}
+          早A:${counts['早A']} / 早B:${counts['早B']} / 日A:${counts['日A']} / 遅:${counts['遅']}<br>夜:${counts['夜']} / 明:${counts['明']} / 休:${counts['休']}<br>
+          <span style="${conseqColor}">最大連勤: ${maxConseq} 日</span>
         </td></tr>`;
       });
       tableHTML += `</tbody></table>`;
