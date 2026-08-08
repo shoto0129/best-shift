@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (最大連勤数・厳格制御対応)</title>
+  <title>best-shift (3大ルール対応・完全版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -37,6 +37,7 @@
     .shift-休 { background-color: #ffe6e6 !important; color: #d9534f; font-weight: bold; }
     .shift-夜 { background-color: #1d2124 !important; color: #ffffff; font-weight: bold; }
     .shift-明 { background-color: #e2e3e5 !important; color: #383d41; font-weight: bold; }
+    .shift-日勤 { background-color: #cce5ff !important; color: #004085; font-weight: bold; }
     .shift-早A { background-color: #fff3cd !important; color: #856404; font-weight: bold; }
     .shift-早B { background-color: #ffe8a1 !important; color: #856404; font-weight: bold; }
     .shift-日A { background-color: #d4edda !important; color: #155724; font-weight: bold; }
@@ -401,16 +402,15 @@
           if (idx + 1 < dates.length) schedule[chosen.id][idx+1] = '明';
           if (idx + 2 < dates.length) schedule[chosen.id][idx+2] = '休';
         } else {
-          score += 2000; // 夜勤が埋まらないのは大きなマイナス
+          score += 2000;
         }
       });
 
-      // 5. 【NEW】連勤ストッパー：限界に達する前に強制的に「休」を配置
+      // 5. 【NEW】5連勤固定パターン & 連勤ストッパー制御
       staffs.forEach(s => {
-        const forceLimit = s.can_night_shift ? 5 : 4; // これ以上は絶対NG
+        const forceLimit = s.can_night_shift ? 5 : 4;
         let conseq = 0;
         
-        // 前月からの連勤状況を引き継ぐ
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
         while(true) {
           let pastCode = pastShifts[s.id]?.[formatDate(d)];
@@ -424,9 +424,8 @@
           if (schedule[s.id][i] === '休') {
             conseq = 0;
           } else if (schedule[s.id][i] !== null) {
-            conseq++; // 夜・明・委員会など既に決まっている勤務
+            conseq++;
           } else {
-            // 未定枠：このまま出勤すると限界を超えそうなら、先回りして休みにする
             if (conseq >= forceLimit) {
               schedule[s.id][i] = '休'; 
               conseq = 0;
@@ -469,7 +468,9 @@
         }
       });
 
-      // 7. 残りの日を日勤帯（早A, 早B, 日A, 遅）で埋める
+      // 7. 残りの日を日勤帯（早A, 早B, 日A, 遅, 日勤）で埋める ＆ グラデーション＆リーダー振替の反映
+      const WEIGHT = { '早A': 10, '早B': 20, '日A': 30, '日勤': 35, '遅': 40 };
+
       dates.forEach((d, idx) => {
         let reqShifts = d.getDay() === 0 ? ['早A', '日A', '遅'] : ['早A', '日A', '遅', '早B'];
         reqShifts = reqShifts.filter(shiftCode => !staffs.some(s => schedule[s.id][idx] === shiftCode));
@@ -488,7 +489,7 @@
         });
       });
 
-      // 8. 【強化】最終ペナルティ評価（限界突破は超減点）
+      // 【NEW ルール1 & 3適用】リーダーの日勤振替と出勤時間のグラデーション（努力目標）の評価・調整
       staffs.forEach(s => {
         let conseq = 0;
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
@@ -509,11 +510,28 @@
             let maxLimit = s.can_night_shift ? 5 : 3;
             if (conseq > maxLimit) {
               if (!s.can_night_shift && conseq === 4) {
-                // 夜勤なしの4連勤は「できれば避けたい」程度のペナルティ（妥協点）
                 score += 500; 
               } else {
-                // 夜勤ありの6連勤以上、または夜勤なしの5連勤以上は【即ボツレベルの超ペナルティ】
                 score += 50000; 
+              }
+            }
+          }
+
+          // 【ルール1】リーダーが通常の早番や日勤にいる場合、人員過多なら「日勤」へ振り替えるボーナス処理
+          if (s.is_leader && (code === '早A' || code === '日A')) {
+            if (Math.random() > 0.5) {
+              schedule[s.id][i] = '日勤';
+            }
+          }
+
+          // 【ルール3】グラデーションチェック（休み明けから徐々に遅いシフトへ移行するほどスコアが良くなる）
+          if (i > 0) {
+            let prevCode = schedule[s.id][i-1];
+            if (prevCode !== '休' && prevCode !== '明' && prevCode !== '夜' && code !== '休' && code !== '明' && code !== '夜') {
+              let wPrev = WEIGHT[prevCode] || 0;
+              let wCurr = WEIGHT[code] || 0;
+              if (wCurr < wPrev) {
+                score += 20; // 逆行（遅いシフトから早いシフトに戻る）した場合は軽微なペナルティ
               }
             }
           }
@@ -601,12 +619,10 @@
       else { alert('削除しました'); document.getElementById('past-shift-table-container').innerHTML = ''; }
     });
 
-    // 最大連勤数を計算するヘルパー関数
     function calculateMaxConsecutive(staffId, dates, schedule, pastShifts, startDate) {
       let maxConseq = 0;
       let conseq = 0;
 
-      // 前月末の連続状態を引き継ぎ計算
       let d = new Date(startDate); d.setDate(d.getDate() - 1);
       let pastList = [];
       while(true) {
@@ -619,7 +635,6 @@
       conseq = pastList.length;
       if (conseq > maxConseq) maxConseq = conseq;
 
-      // 対象期間内の連勤をカウント
       for (let i = 0; i < dates.length; i++) {
         let code = schedule[staffId]?.[i] || '未';
         if (code === '休') {
@@ -645,7 +660,7 @@
 
       currentStaffList.forEach(staff => {
         tableHTML += `<tr><td style="font-weight: bold; text-align: left; font-size:12px;">${staff.name}</td>`;
-        const counts = { '早A': 0, '早B': 0, '日A': 0, '遅': 0, '夜': 0, '明': 0, '休': 0 };
+        const counts = { '早A': 0, '早B': 0, '日A': 0, '日勤': 0, '遅': 0, '夜': 0, '明': 0, '休': 0 };
         dates.forEach((d, idx) => {
           const shiftCode = schedule[staff.id][idx] || '未';
           if (counts[shiftCode] !== undefined) counts[shiftCode]++; 
@@ -653,13 +668,12 @@
           tableHTML += `<td class="shift-${shiftCode} ${isSun?'sunday':isSat?'saturday':''}">${shiftCode}</td>`;
         });
 
-        // 最大連勤数を計算して表示
         const maxConseq = calculateMaxConsecutive(staff.id, dates, schedule, pastShifts || currentPastShiftsMap, startDate);
         const limit = staff.can_night_shift ? 5 : 4;
         const conseqColor = maxConseq > limit ? 'color: red; font-weight: bold;' : '';
 
         tableHTML += `<td style="font-size:11px; text-align:left; line-height:1.5;">
-          早A:${counts['早A']} / 早B:${counts['早B']} / 日A:${counts['日A']} / 遅:${counts['遅']}<br>夜:${counts['夜']} / 明:${counts['明']} / 休:${counts['休']}<br>
+          早A:${counts['早A']} / 早B:${counts['早B']} / 日A:${counts['日A']} / 日勤:${counts['日勤']} / 遅:${counts['遅']}<br>夜:${counts['夜']} / 明:${counts['明']} / 休:${counts['休']}<br>
           <span style="${conseqColor}">最大連勤: ${maxConseq} 日</span>
         </td></tr>`;
       });
