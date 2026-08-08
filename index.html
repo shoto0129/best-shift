@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>best-shift (3大ルール対応・完全版)</title>
+  <title>best-shift (3大ルール・5連勤夜勤明け固定対応版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 10px; }
@@ -372,7 +372,7 @@
         }
       });
 
-      // 4. 夜勤の配置
+      // 4. 夜勤の配置 (ルール2：5連勤目の「明」＝4連勤目の「夜」固定にも連動)
       dates.forEach((d, idx) => {
         const isGrey = (idx % 4 === 0);
         const isBlack = (idx % 4 === 1);
@@ -406,11 +406,9 @@
         }
       });
 
-      // 5. 【NEW】5連勤固定パターン & 連勤ストッパー制御
+      // 5. 連勤制御（夜勤可能スタッフ: 4日目「夜」→5日目「明」→6日目「休」、夜勤不可スタッフ: 4日出勤→5日目「休」）
       staffs.forEach(s => {
-        const forceLimit = s.can_night_shift ? 5 : 4;
         let conseq = 0;
-        
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
         while(true) {
           let pastCode = pastShifts[s.id]?.[formatDate(d)];
@@ -426,11 +424,25 @@
           } else if (schedule[s.id][i] !== null) {
             conseq++;
           } else {
-            if (conseq >= forceLimit) {
-              schedule[s.id][i] = '休'; 
-              conseq = 0;
+            // 夜勤可能な人は「4連勤目＝夜」「5連勤目＝明」「6日目＝休」
+            if (s.can_night_shift) {
+              if (conseq === 3) { // 4日目に差し掛かった時
+                schedule[s.id][i] = '夜';
+                if (i + 1 < dates.length) schedule[s.id][i+1] = '明';
+                if (i + 2 < dates.length) schedule[s.id][i+2] = '休';
+                conseq = 0;
+                i += 2; // 明と休を埋めたためインデックスを進める
+              } else {
+                conseq++;
+              }
             } else {
-              conseq++;
+              // 夜勤不可な人は4連勤で「休」
+              if (conseq >= 4) {
+                schedule[s.id][i] = '休';
+                conseq = 0;
+              } else {
+                conseq++;
+              }
             }
           }
         }
@@ -468,9 +480,7 @@
         }
       });
 
-      // 7. 残りの日を日勤帯（早A, 早B, 日A, 遅, 日勤）で埋める ＆ グラデーション＆リーダー振替の反映
-      const WEIGHT = { '早A': 10, '早B': 20, '日A': 30, '日勤': 35, '遅': 40 };
-
+      // 7. 残りの日を日勤帯で埋める
       dates.forEach((d, idx) => {
         let reqShifts = d.getDay() === 0 ? ['早A', '日A', '遅'] : ['早A', '日A', '遅', '早B'];
         reqShifts = reqShifts.filter(shiftCode => !staffs.some(s => schedule[s.id][idx] === shiftCode));
@@ -489,7 +499,9 @@
         });
       });
 
-      // 【NEW ルール1 & 3適用】リーダーの日勤振替と出勤時間のグラデーション（努力目標）の評価・調整
+      // 【ルール1 & 3適用】
+      const WEIGHT = { '早A': 10, '早B': 20, '日A': 30, '日勤': 35, '遅': 40 };
+
       staffs.forEach(s => {
         let conseq = 0;
         let d = new Date(startDate); d.setDate(d.getDate() - 1);
@@ -507,31 +519,27 @@
             conseq = 0;
           } else {
             conseq++;
-            let maxLimit = s.can_night_shift ? 5 : 3;
+            let maxLimit = s.can_night_shift ? 5 : 4;
             if (conseq > maxLimit) {
-              if (!s.can_night_shift && conseq === 4) {
-                score += 500; 
-              } else {
-                score += 50000; 
-              }
+              score += 50000; // 連勤超過厳禁ペナルティ
             }
           }
 
-          // 【ルール1】リーダーが通常の早番や日勤にいる場合、人員過多なら「日勤」へ振り替えるボーナス処理
+          // 【ルール1】リーダーが通常の早番や日勤にいる場合、日勤へ振替可能なら調整
           if (s.is_leader && (code === '早A' || code === '日A')) {
             if (Math.random() > 0.5) {
               schedule[s.id][i] = '日勤';
             }
           }
 
-          // 【ルール3】グラデーションチェック（休み明けから徐々に遅いシフトへ移行するほどスコアが良くなる）
+          // 【ルール3】グラデーション（同じ時間はペナルティなし・遅い時間から急に早い時間へ戻る場合のみスコア評価）
           if (i > 0) {
             let prevCode = schedule[s.id][i-1];
             if (prevCode !== '休' && prevCode !== '明' && prevCode !== '夜' && code !== '休' && code !== '明' && code !== '夜') {
               let wPrev = WEIGHT[prevCode] || 0;
               let wCurr = WEIGHT[code] || 0;
               if (wCurr < wPrev) {
-                score += 20; // 逆行（遅いシフトから早いシフトに戻る）した場合は軽微なペナルティ
+                score += 15;
               }
             }
           }
